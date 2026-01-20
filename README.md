@@ -1,103 +1,215 @@
-  # Alloy Sysext Build
+# Grafana Alloy systemd-sysext Build Tooling
 
-  Build systemd-sysext images for [Grafana Alloy](https://grafana.com/docs/alloy/) on Flatcar Container Linux.
+Build tooling for creating Grafana Alloy systemd-sysext images for Flatcar Container Linux.
 
-  ## Overview
+## Purpose
 
-  This repository provides tooling to build Grafana Alloy as a systemd-sysext extension image for Flatcar Container
-  Linux. The sysext images are automatically built via GitHub Actions and published to a Cloudflare R2 bucket for
-  consumption by Flatcar instances.
+This repository provides automated build tooling to package [Grafana Alloy](https://grafana.com/docs/alloy/) as a systemd-sysext image for Flatcar Container Linux. systemd-sysext allows you to extend the immutable Flatcar base system with additional binaries and services without modifying the root filesystem.
 
-  ### What is systemd-sysext?
+## What is systemd-sysext?
 
-  systemd-sysext allows extending the `/usr` directory of immutable OS images like Flatcar Container Linux with
-  additional files. This enables adding software without modifying the base OS image.
+systemd-sysext (system extension) images provide a way to overlay additional files onto an immutable OS like Flatcar Container Linux. When merged, the files in the sysext image appear in the host filesystem at their defined paths (e.g., `/usr/local/bin/alloy`).
 
-  ## Usage
+Key benefits:
+- **Immutability**: Extends the system without modifying the base OS
+- **Atomic operations**: Images are merged/unmerged as atomic units
+- **Version management**: Easy to swap versions by changing which image is active
+- **Persistence**: Survives OS updates
 
-  ### Download Pre-built Images
+## Build Requirements
 
-  Pre-built sysext images are available at:
-  https://ghost-sysext-images.separationofconcerns.dev/alloy-{VERSION}-amd64.raw
-  https://ghost-sysext-images.separationofconcerns.dev/alloy-{VERSION}-amd64.raw.sha256
+- Docker or Podman
+- Internet connection (to download Alloy releases)
 
-  Example in Butane configuration:
-  ```yaml
-  storage:
-    files:
-      - path: /opt/extensions/alloy/alloy-1.10.2-amd64.raw
-        mode: 0644
-        contents:
-          source: https://ghost-sysext-images.separationofconcerns.dev/alloy-1.10.2-amd64.raw
-          verification:
-            hash: sha256-feb76c5aa5408c267d59508bd39d322c20d6fce44abd686296f4d0ca87e42671
-    links:
-      - target: /opt/extensions/alloy/alloy-1.10.2-amd64.raw
-        path: /etc/extensions/alloy.raw
-        hard: false
+The build container includes all necessary tools:
+- Ubuntu 22.04 base
+- `curl`, `wget`, `unzip`
+- `squashfs-tools` (for creating the image)
+- `xz-utils` (for compression)
 
-  Build Locally
+## Usage
 
-  # Build the sysext image
-  ./build-alloy-sysext.sh <VERSION>
+### Build the Container Image
 
-  # Example
-  ./build-alloy-sysext.sh 1.10.2
+```bash
+docker build -t alloy-sysext-builder .
+```
 
-  The script will:
-  1. Pull the official Grafana Alloy binary for the specified version
-  2. Create a systemd-sysext directory structure
-  3. Package it as a raw disk image
-  4. Generate a SHA256 checksum
+### Run the Build
 
-  Automated Builds
+```bash
+docker run --rm \
+  -v "${PWD}/output:/output" \
+  alloy-sysext-builder \
+  /build/build-alloy-sysext.sh
+```
 
-  GitHub Actions automatically builds new sysext images when:
-  - A new release is created in this repository
-  - The workflow is manually triggered with a version parameter
+This will:
+1. Download the specified Alloy version from GitHub releases
+2. Create the systemd-sysext directory structure
+3. Install the Alloy binary
+4. Generate a systemd service unit
+5. Create extension metadata
+6. Package everything into a squashfs image
+7. Generate SHA256 checksums
 
-  Built images are automatically uploaded to the Cloudflare R2 bucket.
+### Customize the Build
 
-  Repository Structure
+Edit the configuration variables in `build-alloy-sysext.sh`:
 
-  .
-  ├── Dockerfile              # Container image for building sysext images
-  ├── build-alloy-sysext.sh   # Build script
-  ├── README.md               # This file
-  └── .github/
-      └── workflows/
-          └── build-and-publish.yml  # CI/CD pipeline
+```bash
+VERSION="1.10.2"           # Alloy version to build
+ARCHITECTURE="amd64"        # Target architecture
+SYSEXT_NAME="alloy"        # Extension name
+```
 
-  Requirements
+## Output Format
 
-  - Docker (for containerized builds)
-  - Bash
-  - Standard Unix tools (tar, sha256sum, etc.)
+The build produces the following files in the `output/` directory:
 
-  How It Works
+```
+alloy-1.10.2-amd64.raw          # Architecture-specific sysext image
+alloy-1.10.2-amd64.raw.sha256   # SHA256 checksum
+alloy-1.10.2.raw                # Compatibility version (same content)
+alloy-1.10.2.raw.sha256         # SHA256 checksum
+```
 
-  The build process:
+### File Structure
 
-  1. Downloads the specified Grafana Alloy release binary from GitHub
-  2. Creates a systemd-sysext directory structure with:
-    - /usr/bin/alloy - The Alloy binary
-    - Extension metadata (name, version, architecture)
-  3. Packages the directory as a raw ext4 filesystem image
-  4. Generates SHA256 checksum for integrity verification
+The sysext image contains:
 
-  The resulting .raw file can be placed in /opt/extensions/ on Flatcar and symlinked to /etc/extensions/ to extend the
-  system with Alloy.
+```
+/usr/local/bin/alloy                                    # Alloy binary
+/usr/lib/systemd/system/alloy.service                   # systemd unit
+/usr/lib/extension-release.d/extension-release.alloy    # Extension metadata
+```
 
-  Contributing
+## Using the sysext Image on Flatcar
 
-  Contributions are welcome! Please open an issue or pull request.
+### 1. Copy the Image to Flatcar
 
-  License
+```bash
+scp output/alloy-1.10.2-amd64.raw core@your-flatcar-host:/var/lib/extensions/
+```
 
-  [MIT]
+### 2. Merge the Extension
 
-  Related
+```bash
+systemd-sysext refresh
+systemd-sysext list
+```
 
-  - https://grafana.com/docs/alloy/
-  - https://www.flatcar.org/
-  - https://www.freedesktop.org/software/systemd/man/systemd-sysext.html
+### 3. Verify the Binary
+
+```bash
+which alloy
+alloy --version
+```
+
+### 4. Configure and Enable the Service
+
+Create your Alloy configuration:
+
+```bash
+sudo mkdir -p /var/mnt/storage/alloy
+sudo vi /var/mnt/storage/alloy/config.alloy
+```
+
+Enable and start the service:
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable alloy.service
+sudo systemctl start alloy.service
+sudo systemctl status alloy.service
+```
+
+### 5. View Logs
+
+```bash
+journalctl -u alloy.service -f
+```
+
+## systemd-sysext Image Format
+
+The sysext image is a squashfs filesystem compressed with xz. It must include:
+
+1. **Extension metadata** at `/usr/lib/extension-release.d/extension-release.<name>`:
+   ```
+   ID=_any
+   ARCHITECTURE=x86-64
+   ```
+   
+   - `ID=_any` makes it compatible with any OS (not just Flatcar)
+   - `ARCHITECTURE` must match the host architecture
+
+2. **File hierarchy** under standard paths:
+   - `/usr/local/bin/` for binaries
+   - `/usr/lib/systemd/system/` for systemd units
+   - Other `/usr/` paths as needed
+
+3. **Squashfs format** with xz compression for optimal size
+
+## Service Configuration
+
+The included systemd service (`alloy.service`) is configured with:
+
+- **Config location**: `/var/mnt/storage/alloy/config.alloy`
+- **State directory**: `/var/lib/alloy` (automatically created)
+- **Security hardening**: NoNewPrivileges, ProtectSystem, ProtectHome, PrivateTmp
+- **Automatic restart**: On failure with 10s delay
+
+You can customize the service by editing `build-alloy-sysext.sh` before building.
+
+## Updating Alloy
+
+To update to a new Alloy version:
+
+1. Update the `VERSION` variable in `build-alloy-sysext.sh`
+2. Rebuild the image
+3. Copy the new image to `/var/lib/extensions/` on your Flatcar host
+4. Remove the old image
+5. Run `systemd-sysext refresh`
+6. Restart the service: `sudo systemctl restart alloy.service`
+
+## Troubleshooting
+
+### Extension not merging
+
+Check extension status:
+```bash
+systemd-sysext status
+```
+
+Verify the image format:
+```bash
+unsquashfs -ll /var/lib/extensions/alloy-1.10.2-amd64.raw
+```
+
+### Service not starting
+
+Check logs:
+```bash
+journalctl -u alloy.service -n 50
+```
+
+Verify binary:
+```bash
+file /usr/local/bin/alloy
+/usr/local/bin/alloy --version
+```
+
+Check config syntax:
+```bash
+/usr/local/bin/alloy fmt /var/mnt/storage/alloy/config.alloy
+```
+
+## References
+
+- [Grafana Alloy Documentation](https://grafana.com/docs/alloy/)
+- [systemd-sysext Documentation](https://www.freedesktop.org/software/systemd/man/systemd-sysext.html)
+- [Flatcar Container Linux Documentation](https://www.flatcar.org/docs/latest/)
+
+## License
+
+MIT License - see [LICENSE](LICENSE) file for details.
