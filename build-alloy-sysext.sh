@@ -2,8 +2,8 @@
 set -euo pipefail
 
 # Configuration
-VERSION="1.10.2"
-ARCHITECTURE="amd64"
+VERSION="${VERSION:-1.10.2}"  # Use env var or default to 1.10.2
+ARCHITECTURE="${ARCHITECTURE:-amd64}"
 SYSEXT_NAME="alloy"
 DOWNLOAD_URL="https://github.com/grafana/alloy/releases/download/v${VERSION}/alloy-linux-${ARCHITECTURE}.zip"
 
