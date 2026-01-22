@@ -1,0 +1,192 @@
+name: Build and Publish Alloy Sysext
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Alloy version to build (e.g., 1.10.2)'
+        required: true
+        type: string
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}-builder
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Determine version
+        id: version
+        run: |
+          if [ "${{ github.event_name }}" = "release" ]; then
+            # Extract version from release tag (remove 'v' prefix if present)
+            VERSION="${{ github.event.release.tag_name }}"
+            VERSION="${VERSION#v}"
+          else
+            # Use manually provided version
+            VERSION="${{ inputs.version }}"
+          fi
+          echo "version=${VERSION}" >> $GITHUB_OUTPUT
+          echo "Building Alloy sysext for version: ${VERSION}"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build Docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          load: true
+          tags: alloy-sysext-builder:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Create output directory
+        run: mkdir -p output
+
+      - name: Build sysext image
+        run: |
+          docker run --rm \
+            -v "${PWD}/output:/output" \
+            -v "${PWD}/build-alloy-sysext.sh:/build/build-alloy-sysext.sh:ro" \
+            -e VERSION="${{ steps.version.outputs.version }}" \
+            alloy-sysext-builder:latest \
+            /build/build-alloy-sysext.sh
+
+      - name: List output files
+        run: ls -la output/
+
+      - name: Validate sysext structure
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          SYSEXT_FILE="output/alloy-${VERSION}-amd64.raw"
+
+          echo "=== Validating sysext image ==="
+
+          # Check file exists
+          if [ ! -f "${SYSEXT_FILE}" ]; then
+            echo "ERROR: Sysext image not found: ${SYSEXT_FILE}"
+            exit 1
+          fi
+
+          # Extract and validate structure
+          sudo unsquashfs -d /tmp/sysext-check "${SYSEXT_FILE}"
+
+          # Verify binary exists and is executable
+          if [ ! -x /tmp/sysext-check/usr/local/bin/alloy ]; then
+            echo "ERROR: Alloy binary not found or not executable"
+            exit 1
+          fi
+          echo "✓ Alloy binary found and executable"
+
+          # Verify systemd service exists
+          if [ ! -f /tmp/sysext-check/usr/lib/systemd/system/alloy.service ]; then
+            echo "ERROR: systemd service file not found"
+            exit 1
+          fi
+          echo "✓ systemd service file found"
+
+          # Verify extension-release metadata
+          if [ ! -f /tmp/sysext-check/usr/lib/extension-release.d/extension-release.alloy ]; then
+            echo "ERROR: extension-release metadata not found"
+            exit 1
+          fi
+          echo "✓ extension-release metadata found"
+
+          # Verify metadata content
+          if ! grep -q "ID=_any" /tmp/sysext-check/usr/lib/extension-release.d/extension-release.alloy; then
+            echo "ERROR: Invalid extension-release ID"
+            exit 1
+          fi
+          echo "✓ extension-release metadata valid"
+
+          echo "=== Validation passed ==="
+
+      - name: Verify checksums
+        run: |
+          cd output
+          echo "=== Verifying checksums ==="
+          sha256sum -c alloy-${{ steps.version.outputs.version }}-amd64.raw.sha256
+          sha256sum -c alloy-${{ steps.version.outputs.version }}.raw.sha256
+          echo "=== Checksums verified ==="
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: alloy-sysext-${{ steps.version.outputs.version }}
+          path: |
+            output/*.raw
+            output/*.sha256
+          retention-days: 30
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    if: github.event_name == 'release' || github.event_name == 'workflow_dispatch'
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: alloy-sysext-${{ needs.build.outputs.version }}
+          path: output
+
+      - name: List artifacts
+        run: ls -la output/
+
+      - name: Install Bitwarden Secrets Manager CLI (bws)
+        run: |
+          set -euo pipefail
+          curl -fsSL \
+            https://github.com/bitwarden/sdk-sm/releases/download/bws-v1.0.0/bws-x86_64-unknown-linux-gnu-1.0.0.zip \
+            -o /tmp/bws.zip
+          unzip -q /tmp/bws.zip -d /tmp/bws
+          sudo mv /tmp/bws/bws /usr/local/bin/bws
+          sudo chmod +x /usr/local/bin/bws
+          bws --version
+
+      - name: Retrieve R2 credentials from Bitwarden
+        env:
+          BWS_ACCESS_TOKEN: ${{ secrets.BWS_ACCESS_TOKEN }}
+        run: |
+          ./scripts/fetch-secrets.sh --ci --export-github-env
+
+      - name: Upload to R2
+        run: |
+          VERSION="${{ needs.build.outputs.version }}"
+
+          # Install AWS CLI (compatible with R2)
+          pip install awscli
+
+          # Configure AWS CLI for R2
+          aws configure set aws_access_key_id "${R2_ACCESS_KEY_ID}"
+          aws configure set aws_secret_access_key "${R2_SECRET_ACCESS_KEY}"
+
+          echo "=== Uploading to R2 bucket ==="
+
+          # Upload files to R2
+          for file in output/*.raw output/*.sha256; do
+            filename=$(basename "$file")
+            echo "Uploading ${filename}..."
+            aws s3 cp "$file" "s3://${R2_BUCKET}/${filename}" \
+              --endpoint-url "${R2_ENDPOINT}"
+          done
+
+          echo "=== Upload complete ==="
+          echo "Files available at: https://ghost-sysext-images.separationofconcerns.dev/"
