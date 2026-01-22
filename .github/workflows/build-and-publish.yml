@@ -168,9 +168,6 @@ jobs:
           ./scripts/fetch-secrets.sh --ci --export-github-env
 
       - name: Upload to R2
-        env:
-          R2_ENDPOINT: ${{ vars.R2_ENDPOINT }}
-          R2_BUCKET: ${{ vars.R2_BUCKET }}
         run: |
           VERSION="${{ needs.build.outputs.version }}"
 

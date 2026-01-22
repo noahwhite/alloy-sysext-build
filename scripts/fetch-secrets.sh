@@ -127,7 +127,7 @@ echo "Retrieving R2 credentials from Bitwarden Secrets Manager..."
 
 # ============================================================================
 # Retrieve secrets using hardcoded Bitwarden secret IDs
-# These are the same R2 credentials used by ghost-stack
+# These are the same credentials used by ghost-stack
 # ============================================================================
 
 # Retrieve into local variables (do not echo values)
@@ -136,6 +136,9 @@ mask_value "$R2_ACCESS_KEY_ID"
 
 R2_SECRET_ACCESS_KEY="$(get_bws_secret "f5d9794d-fd45-4dcb-9994-b39b002b5056")"
 mask_value "$R2_SECRET_ACCESS_KEY"
+
+CLOUDFLARE_ACCOUNT_ID="$(get_bws_secret "2fea4609-0d6b-4d8d-b9b5-b39b002de85b")"
+mask_value "$CLOUDFLARE_ACCOUNT_ID"
 
 echo "Successfully retrieved secrets from Bitwarden Secrets Manager"
 
@@ -150,8 +153,22 @@ if [[ -z "$R2_SECRET_ACCESS_KEY" ]]; then
   exit 1
 fi
 
+if [[ -z "$CLOUDFLARE_ACCOUNT_ID" ]]; then
+  echo "❌ Failed to retrieve CLOUDFLARE_ACCOUNT_ID from Bitwarden" >&2
+  exit 1
+fi
+
+# Construct R2 endpoint from account ID
+R2_ENDPOINT="https://${CLOUDFLARE_ACCOUNT_ID}.r2.cloudflarestorage.com"
+
+# Hardcoded R2 bucket name for sysext images
+# Public URL: https://ghost-sysext-images.separationofconcerns.dev
+R2_BUCKET="ghost-sysext-images"
+
 # Export (and optionally write to $GITHUB_ENV) without printing values
 export_var "R2_ACCESS_KEY_ID" "${R2_ACCESS_KEY_ID}"
 export_var "R2_SECRET_ACCESS_KEY" "${R2_SECRET_ACCESS_KEY}"
+export_var "R2_ENDPOINT" "${R2_ENDPOINT}"
+export_var "R2_BUCKET" "${R2_BUCKET}"
 
-echo "✅ R2 credentials exported successfully"
+echo "✅ R2 credentials and configuration exported successfully"
