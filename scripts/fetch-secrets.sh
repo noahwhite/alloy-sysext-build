@@ -161,8 +161,8 @@ echo "✅ Successfully retrieved secrets from Bitwarden Secrets Manager"
 # Construct R2 endpoint from account ID
 R2_ENDPOINT="https://${CLOUDFLARE_ACCOUNT_ID}.r2.cloudflarestorage.com"
 
-# R2 bucket name (matches the public custom domain)
-R2_BUCKET="ghost-sysext-images.separationofconcerns.dev"
+# R2 bucket name (hardcoded to dev for now, environment support can be added later)
+R2_BUCKET="ghost-dev-sysext-images"
 
 # Export (and optionally write to $GITHUB_ENV) without printing values
 export_var "R2_ACCESS_KEY_ID" "${R2_ACCESS_KEY_ID}"
