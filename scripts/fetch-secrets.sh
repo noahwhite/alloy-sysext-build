@@ -140,8 +140,6 @@ mask_value "$R2_SECRET_ACCESS_KEY"
 CLOUDFLARE_ACCOUNT_ID="$(get_bws_secret "2fea4609-0d6b-4d8d-b9b5-b39b002de85b")"
 mask_value "$CLOUDFLARE_ACCOUNT_ID"
 
-echo "Successfully retrieved secrets from Bitwarden Secrets Manager"
-
 # Validate secrets were retrieved
 if [[ -z "$R2_ACCESS_KEY_ID" ]]; then
   echo "❌ Failed to retrieve R2_ACCESS_KEY_ID from Bitwarden" >&2
@@ -158,12 +156,13 @@ if [[ -z "$CLOUDFLARE_ACCOUNT_ID" ]]; then
   exit 1
 fi
 
+echo "✅ Successfully retrieved secrets from Bitwarden Secrets Manager"
+
 # Construct R2 endpoint from account ID
 R2_ENDPOINT="https://${CLOUDFLARE_ACCOUNT_ID}.r2.cloudflarestorage.com"
 
-# Hardcoded R2 bucket name for sysext images
-# Public URL: https://ghost-sysext-images.separationofconcerns.dev
-R2_BUCKET="ghost-sysext-images"
+# R2 bucket name (matches the public custom domain)
+R2_BUCKET="ghost-sysext-images.separationofconcerns.dev"
 
 # Export (and optionally write to $GITHUB_ENV) without printing values
 export_var "R2_ACCESS_KEY_ID" "${R2_ACCESS_KEY_ID}"
