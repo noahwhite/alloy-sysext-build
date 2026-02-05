@@ -89,13 +89,13 @@ R2 credentials are retrieved at runtime from Bitwarden (not stored in GitHub).
 
 ### Creating GHOST_STACK_PAT
 
-The PAT must have these permissions on the ghost-stack repository:
-- `repo` (Full control of private repositories)
+The PAT needs permission to create branches and PRs in ghost-stack (public repository):
+- `public_repo` (Access public repositories)
 
 To create:
 1. Go to https://github.com/settings/tokens
 2. Generate new token (classic)
-3. Select `repo` scope
+3. Select `public_repo` scope
 4. Add as repository secret named `GHOST_STACK_PAT`
 
 ## Building Locally
