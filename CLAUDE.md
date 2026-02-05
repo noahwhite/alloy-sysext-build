@@ -90,13 +90,16 @@ R2 credentials are retrieved at runtime from Bitwarden (not stored in GitHub).
 ### Creating GHOST_STACK_PAT
 
 The PAT needs permission to create branches and PRs in ghost-stack (public repository):
-- `public_repo` (Access public repositories)
+- `public_repo` (under `repo` scope - access public repositories only)
 
 To create:
 1. Go to https://github.com/settings/tokens
 2. Generate new token (classic)
-3. Select `public_repo` scope
-4. Add as repository secret named `GHOST_STACK_PAT`
+3. Under `repo` scope, select only `public_repo`
+4. Set expiration to 90 days
+5. Add as repository secret named `GHOST_STACK_PAT`
+
+**Rotation:** This token expires every 90 days. See `ghost-stack/docs/token-rotation-runbook.md` for rotation procedure.
 
 ## Building Locally
 
