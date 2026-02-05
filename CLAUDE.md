@@ -37,30 +37,66 @@ This repository provides automated build tooling to package Grafana Alloy as a s
 
 ```
 .github/workflows/
-  build-and-publish.yml   # CI/CD pipeline
+  build-and-publish.yml     # CI/CD pipeline for building and publishing sysext images
+  check-new-releases.yml    # Daily check for new Alloy releases
 scripts/
-  fetch-secrets.sh        # Retrieves R2 credentials from Bitwarden
-Dockerfile                # Build container image
-build-alloy-sysext.sh     # Main build script
+  fetch-secrets.sh          # Retrieves R2 credentials from Bitwarden
+Dockerfile                  # Build container image
+build-alloy-sysext.sh       # Main build script
+version.txt                 # Tracks last built Alloy version
 ```
 
-## CI/CD Workflow
+## CI/CD Workflows
 
-The `build-and-publish.yml` workflow:
+### build-and-publish.yml
+
+Builds, validates, publishes sysext images and creates ghost-stack PRs:
+
 1. Builds a Docker container with build tools
 2. Runs `build-alloy-sysext.sh` to create the sysext image
 3. Validates the image structure
 4. Retrieves R2 credentials from Bitwarden via `fetch-secrets.sh`
 5. Uploads to Cloudflare R2 bucket
+6. **Creates a PR in ghost-stack** to update ghost.bu with the new version and hash
 
 Triggered by:
 - GitHub release (extracts version from tag)
 - Manual workflow dispatch (specify version)
+- Automated trigger from check-new-releases.yml
+
+### check-new-releases.yml
+
+Automated version detection that runs daily:
+
+1. Reads current built version from `version.txt`
+2. Checks latest stable Alloy release from GitHub API
+3. Compares versions to detect updates
+4. Triggers `build-and-publish.yml` if new version found
+5. Updates `version.txt` and creates a tracking issue
+
+Triggered by:
+- Daily cron schedule (midnight UTC)
+- Manual workflow dispatch (with optional dry-run)
 
 ## Secrets Management
 
-- **BWS_ACCESS_TOKEN**: Repository secret for Bitwarden Secrets Manager access
-- R2 credentials are retrieved at runtime from Bitwarden (not stored in GitHub)
+| Secret | Purpose |
+|--------|---------|
+| `BWS_ACCESS_TOKEN` | Bitwarden Secrets Manager access |
+| `GHOST_STACK_PAT` | Personal Access Token for creating PRs in ghost-stack |
+
+R2 credentials are retrieved at runtime from Bitwarden (not stored in GitHub).
+
+### Creating GHOST_STACK_PAT
+
+The PAT must have these permissions on the ghost-stack repository:
+- `repo` (Full control of private repositories)
+
+To create:
+1. Go to https://github.com/settings/tokens
+2. Generate new token (classic)
+3. Select `repo` scope
+4. Add as repository secret named `GHOST_STACK_PAT`
 
 ## Building Locally
 

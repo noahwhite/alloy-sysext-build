@@ -122,11 +122,18 @@ ${RELEASE_NOTES}
 
 ---
 
+### Automated Pipeline
+
+The build workflow will:
+1. Build the sysext image
+2. Upload to R2
+3. **Create a PR in ghost-stack** to update ghost.bu
+
 ### Next Steps
 
 1. Wait for the build workflow to complete
-2. Verify the sysext image is uploaded to R2
-3. Update ghost-stack to use the new version
+2. Review and merge the auto-generated ghost-stack PR
+3. Verify Alloy on the instance after deployment
 
 ### Files
 

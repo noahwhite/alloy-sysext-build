@@ -190,3 +190,109 @@ jobs:
 
           echo "=== Upload complete ==="
           echo "Files available at: https://ghost-sysext-images.separationofconcerns.dev/"
+
+      - name: Extract SHA256 hash
+        id: hash
+        run: |
+          VERSION="${{ needs.build.outputs.version }}"
+          # Read hash from checksum file (format: "hash  filename")
+          HASH=$(cut -d' ' -f1 output/alloy-${VERSION}-amd64.raw.sha256)
+          echo "sha256=${HASH}" >> $GITHUB_OUTPUT
+          echo "SHA256 hash: ${HASH}"
+
+      - name: Create ghost-stack PR
+        env:
+          GH_TOKEN: ${{ secrets.GHOST_STACK_PAT }}
+        run: |
+          VERSION="${{ needs.build.outputs.version }}"
+          HASH="${{ steps.hash.outputs.sha256 }}"
+          BRANCH="feature/GHO-21-update-alloy-to-${VERSION}"
+
+          echo "=== Creating ghost-stack PR for Alloy ${VERSION} ==="
+
+          # Clone ghost-stack repository
+          git clone https://x-access-token:${GH_TOKEN}@github.com/noahwhite/ghost-stack.git /tmp/ghost-stack
+          cd /tmp/ghost-stack
+
+          # Configure git
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          # Create feature branch from develop
+          git checkout develop
+          git checkout -b "${BRANCH}"
+
+          # Update ghost.bu with new version and hash
+          GHOST_BU="opentofu/modules/vultr/instance/userdata/ghost.bu"
+
+          # Get current version for the sed pattern
+          CURRENT_VERSION=$(grep -oP 'alloy-\K[0-9]+\.[0-9]+\.[0-9]+(?=-amd64\.raw)' "${GHOST_BU}" | head -1)
+
+          if [ -z "${CURRENT_VERSION}" ]; then
+            echo "ERROR: Could not determine current Alloy version in ghost.bu"
+            exit 1
+          fi
+
+          echo "Updating from ${CURRENT_VERSION} to ${VERSION}"
+
+          # Update version in path and source URL (3 occurrences: file path, source URL, symlink)
+          sed -i "s/alloy-${CURRENT_VERSION}-amd64\.raw/alloy-${VERSION}-amd64.raw/g" "${GHOST_BU}"
+
+          # Update SHA256 hash
+          sed -i "s/sha256-[a-f0-9]\{64\}/sha256-${HASH}/g" "${GHOST_BU}"
+
+          # Verify changes were made
+          if ! grep -q "alloy-${VERSION}-amd64.raw" "${GHOST_BU}"; then
+            echo "ERROR: Version update failed"
+            exit 1
+          fi
+
+          if ! grep -q "sha256-${HASH}" "${GHOST_BU}"; then
+            echo "ERROR: Hash update failed"
+            exit 1
+          fi
+
+          echo "✓ ghost.bu updated successfully"
+
+          # Commit and push
+          git add "${GHOST_BU}"
+          git commit -m "chore: update Grafana Alloy sysext to ${VERSION}"
+          git push -u origin "${BRANCH}"
+
+          # Create PR
+          gh pr create \
+            --repo noahwhite/ghost-stack \
+            --base develop \
+            --head "${BRANCH}" \
+            --title "Update Grafana Alloy sysext to ${VERSION}" \
+            --body "$(cat <<EOF
+          ## Summary
+
+          - Updates Grafana Alloy sysext from ${CURRENT_VERSION} to ${VERSION}
+          - Updates SHA256 hash to \`${HASH}\`
+
+          ## Automated PR
+
+          This PR was automatically created by the alloy-sysext-build CI pipeline after successfully building and publishing Alloy ${VERSION}.
+
+          ## Test plan
+
+          - [ ] Review the version and hash changes in ghost.bu
+          - [ ] Merge PR to trigger deployment
+          - [ ] Verify Alloy version on instance: \`alloy --version\`
+          - [ ] Verify Alloy service status: \`systemctl status alloy\`
+
+          ## Related
+
+          - Sysext image: https://ghost-sysext-images.separationofconcerns.dev/alloy-${VERSION}-amd64.raw
+          - Alloy release: https://github.com/grafana/alloy/releases/tag/v${VERSION}
+          EOF
+          )"
+
+          # Assign PR to Noah White
+          PR_NUMBER=$(gh pr view --repo noahwhite/ghost-stack --json number -q '.number')
+          gh api repos/noahwhite/ghost-stack/issues/${PR_NUMBER} \
+            --method PATCH \
+            --field assignees[]="noahwhite"
+
+          echo "=== PR created and assigned ==="
