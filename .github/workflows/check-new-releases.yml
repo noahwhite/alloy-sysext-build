@@ -1,0 +1,154 @@
+name: Check for New Alloy Releases
+
+on:
+  schedule:
+    # Run daily at midnight UTC
+    - cron: '0 0 * * *'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Dry run - check for updates without triggering build'
+        required: false
+        type: boolean
+        default: false
+
+jobs:
+  check-releases:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      actions: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Get current built version
+        id: current
+        run: |
+          if [ -f version.txt ]; then
+            CURRENT_VERSION=$(cat version.txt | tr -d '[:space:]')
+          else
+            CURRENT_VERSION="0.0.0"
+          fi
+          echo "version=${CURRENT_VERSION}" >> $GITHUB_OUTPUT
+          echo "Current built version: ${CURRENT_VERSION}"
+
+      - name: Check latest Alloy release
+        id: latest
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # Get latest stable release (non-prerelease)
+          LATEST=$(gh api repos/grafana/alloy/releases \
+            --jq '[.[] | select(.prerelease == false)] | .[0].tag_name' \
+            | sed 's/^v//')
+          
+          if [ -z "$LATEST" ]; then
+            echo "ERROR: Could not determine latest Alloy version"
+            exit 1
+          fi
+          
+          echo "version=${LATEST}" >> $GITHUB_OUTPUT
+          echo "Latest Alloy version: ${LATEST}"
+
+      - name: Compare versions
+        id: compare
+        run: |
+          CURRENT="${{ steps.current.outputs.version }}"
+          LATEST="${{ steps.latest.outputs.version }}"
+          
+          echo "Comparing: current=${CURRENT} vs latest=${LATEST}"
+          
+          # Use sort -V for version comparison
+          HIGHER=$(echo -e "${CURRENT}\n${LATEST}" | sort -V | tail -1)
+          
+          if [ "$HIGHER" = "$LATEST" ] && [ "$CURRENT" != "$LATEST" ]; then
+            echo "New version available: ${LATEST}"
+            echo "update_available=true" >> $GITHUB_OUTPUT
+          else
+            echo "Already up to date"
+            echo "update_available=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Trigger build workflow
+        if: steps.compare.outputs.update_available == 'true' && inputs.dry_run != true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION="${{ steps.latest.outputs.version }}"
+          echo "Triggering build for version ${VERSION}"
+          
+          gh workflow run build-and-publish.yml \
+            --field version="${VERSION}"
+          
+          echo "Build workflow triggered for version ${VERSION}"
+
+      - name: Update version.txt
+        if: steps.compare.outputs.update_available == 'true' && inputs.dry_run != true
+        run: |
+          VERSION="${{ steps.latest.outputs.version }}"
+          echo "${VERSION}" > version.txt
+          
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add version.txt
+          git commit -m "chore: update version.txt to ${VERSION}"
+          git push
+
+      - name: Create tracking issue
+        if: steps.compare.outputs.update_available == 'true' && inputs.dry_run != true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION="${{ steps.latest.outputs.version }}"
+          
+          # Get release notes
+          RELEASE_NOTES=$(gh api repos/grafana/alloy/releases/tags/v${VERSION} \
+            --jq '.body' | head -50)
+          
+          gh issue create \
+            --title "Alloy ${VERSION} sysext build triggered" \
+            --body "## Automated Build Triggered
+
+A new Grafana Alloy release was detected and a sysext build has been triggered.
+
+**Version:** ${VERSION}
+**Release:** https://github.com/grafana/alloy/releases/tag/v${VERSION}
+
+### Release Notes (excerpt)
+
+${RELEASE_NOTES}
+
+---
+
+### Automated Pipeline
+
+The build workflow will:
+1. Build the sysext image
+2. Upload to R2
+3. **Create a PR in ghost-stack** to update ghost.bu
+
+### Next Steps
+
+1. Wait for the build workflow to complete
+2. Review and merge the auto-generated ghost-stack PR
+3. Verify Alloy on the instance after deployment
+
+### Files
+
+Once built, the sysext will be available at:
+- \`https://ghost-sysext-images.separationofconcerns.dev/alloy-${VERSION}-amd64.raw\`
+- \`https://ghost-sysext-images.separationofconcerns.dev/alloy-${VERSION}-amd64.raw.sha256\`
+"
+
+      - name: Summary
+        run: |
+          echo "## Version Check Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Property | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|----------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Current Version | ${{ steps.current.outputs.version }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Latest Version | ${{ steps.latest.outputs.version }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Update Available | ${{ steps.compare.outputs.update_available }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Dry Run | ${{ inputs.dry_run || 'false' }} |" >> $GITHUB_STEP_SUMMARY
