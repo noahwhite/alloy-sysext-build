@@ -210,13 +210,16 @@ jobs:
 
           echo "=== Creating ghost-stack PR for Alloy ${VERSION} ==="
 
-          # Clone ghost-stack repository
-          git clone https://x-access-token:${GH_TOKEN}@github.com/noahwhite/ghost-stack.git /tmp/ghost-stack
+          # Clone ghost-stack repository using gh CLI (uses GH_TOKEN automatically)
+          gh repo clone noahwhite/ghost-stack /tmp/ghost-stack
           cd /tmp/ghost-stack
 
           # Configure git
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          # Configure git to use gh CLI for authentication (avoids token in URLs)
+          gh auth setup-git
 
           # Create feature branch from develop
           git checkout develop
