@@ -255,9 +255,20 @@ jobs:
 
           echo "Updating from ${CURRENT_VERSION} to ${VERSION}"
 
-          # Update the content
+          # Extract the current Alloy hash (appears after the alloy source URL)
+          CURRENT_HASH=$(echo "$CURRENT_CONTENT" | grep -A3 "ghost-sysext-images.separationofconcerns.dev/alloy-" | grep -oP 'sha256-\K[a-f0-9]{64}' | head -1)
+
+          if [ -z "${CURRENT_HASH}" ]; then
+            echo "ERROR: Could not find current Alloy hash in ghost.bu"
+            exit 1
+          fi
+
+          echo "Current Alloy hash: ${CURRENT_HASH}"
+          echo "New Alloy hash: ${HASH}"
+
+          # Update the content - only replace the specific Alloy hash, not all hashes
           NEW_CONTENT=$(echo "$CURRENT_CONTENT" | sed "s/alloy-${CURRENT_VERSION}-amd64\.raw/alloy-${VERSION}-amd64.raw/g")
-          NEW_CONTENT=$(echo "$NEW_CONTENT" | sed "s/sha256-[a-f0-9]\{64\}/sha256-${HASH}/g")
+          NEW_CONTENT=$(echo "$NEW_CONTENT" | sed "s/sha256-${CURRENT_HASH}/sha256-${HASH}/g")
 
           # Verify changes were made
           if ! echo "$NEW_CONTENT" | grep -q "alloy-${VERSION}-amd64.raw"; then
