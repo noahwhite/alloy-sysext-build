@@ -320,7 +320,8 @@ jobs:
           echo "PR created: ${PR_URL}"
 
           # Assign PR to Noah White
-          PR_NUMBER=$(gh pr view --repo ${REPO} --json number -q '.number')
+          # Extract PR number from URL (format: https://github.com/owner/repo/pull/123)
+          PR_NUMBER=$(echo "${PR_URL}" | grep -oP 'pull/\K\d+')
           gh api repos/${REPO}/issues/${PR_NUMBER} \
             --method PATCH \
             --field assignees[]="noahwhite"
