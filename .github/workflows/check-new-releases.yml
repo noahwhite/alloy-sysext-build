@@ -109,38 +109,40 @@ jobs:
           
           gh issue create \
             --title "Alloy ${VERSION} sysext build triggered" \
-            --body "## Automated Build Triggered
+            --body "$(cat <<EOF
+          ## Automated Build Triggered
 
-A new Grafana Alloy release was detected and a sysext build has been triggered.
+          A new Grafana Alloy release was detected and a sysext build has been triggered.
 
-**Version:** ${VERSION}
-**Release:** https://github.com/grafana/alloy/releases/tag/v${VERSION}
+          **Version:** ${VERSION}
+          **Release:** https://github.com/grafana/alloy/releases/tag/v${VERSION}
 
-### Release Notes (excerpt)
+          ### Release Notes (excerpt)
 
-${RELEASE_NOTES}
+          ${RELEASE_NOTES}
 
----
+          ---
 
-### Automated Pipeline
+          ### Automated Pipeline
 
-The build workflow will:
-1. Build the sysext image
-2. Upload to R2
-3. **Create a PR in ghost-stack** to update ghost.bu
+          The build workflow will:
+          1. Build the sysext image
+          2. Upload to R2
+          3. **Create a PR in ghost-stack** to update ghost.bu
 
-### Next Steps
+          ### Next Steps
 
-1. Wait for the build workflow to complete
-2. Review and merge the auto-generated ghost-stack PR
-3. Verify Alloy on the instance after deployment
+          1. Wait for the build workflow to complete
+          2. Review and merge the auto-generated ghost-stack PR
+          3. Verify Alloy on the instance after deployment
 
-### Files
+          ### Files
 
-Once built, the sysext will be available at:
-- \`https://ghost-sysext-images.separationofconcerns.dev/alloy-${VERSION}-amd64.raw\`
-- \`https://ghost-sysext-images.separationofconcerns.dev/alloy-${VERSION}-amd64.raw.sha256\`
-"
+          Once built, the sysext will be available at:
+          - https://ghost-sysext-images.separationofconcerns.dev/alloy-${VERSION}-amd64.raw
+          - https://ghost-sysext-images.separationofconcerns.dev/alloy-${VERSION}-amd64.raw.sha256
+          EOF
+          )"
 
       - name: Summary
         run: |
