@@ -29,10 +29,13 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           # Get latest release tag from this repo (tracks last built version)
-          CURRENT_VERSION=$(gh api repos/${{ github.repository }}/releases/latest \
-            --jq '.tag_name' 2>/dev/null | sed 's/^v//' || echo "0.0.0")
+          # Use --silent to suppress errors, check if response contains tag_name
+          RESPONSE=$(gh api repos/${{ github.repository }}/releases/latest 2>/dev/null || echo '{}')
 
-          if [ -z "$CURRENT_VERSION" ] || [ "$CURRENT_VERSION" = "null" ]; then
+          if echo "$RESPONSE" | jq -e '.tag_name' > /dev/null 2>&1; then
+            CURRENT_VERSION=$(echo "$RESPONSE" | jq -r '.tag_name' | sed 's/^v//')
+          else
+            # No releases yet
             CURRENT_VERSION="0.0.0"
           fi
 
