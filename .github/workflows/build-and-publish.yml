@@ -200,9 +200,18 @@ jobs:
           echo "sha256=${HASH}" >> $GITHUB_OUTPUT
           echo "SHA256 hash: ${HASH}"
 
+      - name: Generate GitHub App token
+        id: app-token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ secrets.APP_ID }}
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+          owner: noahwhite
+          repositories: ghost-stack
+
       - name: Create ghost-stack PR
         env:
-          GH_TOKEN: ${{ secrets.GHOST_STACK_PAT }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
         run: |
           VERSION="${{ needs.build.outputs.version }}"
           HASH="${{ steps.hash.outputs.sha256 }}"
