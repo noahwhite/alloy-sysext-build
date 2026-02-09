@@ -299,26 +299,27 @@ jobs:
 
           # Create PR
           echo "Creating pull request..."
-          PR_BODY="## Summary
-
-- Updates Grafana Alloy sysext from ${CURRENT_VERSION} to ${VERSION}
-- Updates SHA256 hash to \`${HASH}\`
-
-## Automated PR
-
-This PR was automatically created by the alloy-sysext-build CI pipeline after successfully building and publishing Alloy ${VERSION}.
-
-## Test plan
-
-- [ ] Review the version and hash changes in ghost.bu
-- [ ] Merge PR to trigger deployment
-- [ ] Verify Alloy version on instance: \`alloy --version\`
-- [ ] Verify Alloy service status: \`systemctl status alloy\`
-
-## Related
-
-- [Alloy Release](https://github.com/grafana/alloy/releases/tag/v${VERSION})
-- [Sysext Image](https://ghost-sysext-images.separationofconcerns.dev/alloy-${VERSION}-amd64.raw)"
+          printf -v PR_BODY '%s\n' \
+            "## Summary" \
+            "" \
+            "- Updates Grafana Alloy sysext from ${CURRENT_VERSION} to ${VERSION}" \
+            "- Updates SHA256 hash to \`${HASH}\`" \
+            "" \
+            "## Automated PR" \
+            "" \
+            "This PR was automatically created by the alloy-sysext-build CI pipeline." \
+            "" \
+            "## Test plan" \
+            "" \
+            "- [ ] Review the version and hash changes in ghost.bu" \
+            "- [ ] Merge PR to trigger deployment" \
+            "- [ ] Verify Alloy version on instance: \`alloy --version\`" \
+            "- [ ] Verify Alloy service status: \`systemctl status alloy\`" \
+            "" \
+            "## Related" \
+            "" \
+            "- [Alloy Release](https://github.com/grafana/alloy/releases/tag/v${VERSION})" \
+            "- [Sysext Image](https://ghost-sysext-images.separationofconcerns.dev/alloy-${VERSION}-amd64.raw)"
 
           PR_URL=$(gh pr create \
             --repo ${REPO} \
