@@ -207,29 +207,30 @@ jobs:
           VERSION="${{ needs.build.outputs.version }}"
           HASH="${{ steps.hash.outputs.sha256 }}"
           BRANCH="feature/GHO-21-update-alloy-to-${VERSION}"
+          REPO="noahwhite/ghost-stack"
+          FILE_PATH="opentofu/modules/vultr/instance/userdata/ghost.bu"
 
           echo "=== Creating ghost-stack PR for Alloy ${VERSION} ==="
 
-          # Clone ghost-stack repository using gh CLI (uses GH_TOKEN automatically)
-          gh repo clone noahwhite/ghost-stack /tmp/ghost-stack
-          cd /tmp/ghost-stack
+          # Get the SHA of the develop branch
+          DEVELOP_SHA=$(gh api repos/${REPO}/git/ref/heads/develop --jq '.object.sha')
+          echo "Develop branch SHA: ${DEVELOP_SHA}"
 
-          # Configure git
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
+          # Create feature branch from develop using the API
+          echo "Creating branch ${BRANCH}..."
+          gh api repos/${REPO}/git/refs \
+            --method POST \
+            --field ref="refs/heads/${BRANCH}" \
+            --field sha="${DEVELOP_SHA}"
 
-          # Configure git to use gh CLI for authentication (avoids token in URLs)
-          gh auth setup-git
+          # Get current file content and SHA
+          echo "Fetching current ghost.bu..."
+          FILE_RESPONSE=$(gh api repos/${REPO}/contents/${FILE_PATH}?ref=develop)
+          FILE_SHA=$(echo "$FILE_RESPONSE" | jq -r '.sha')
+          CURRENT_CONTENT=$(echo "$FILE_RESPONSE" | jq -r '.content' | base64 -d)
 
-          # Create feature branch from develop
-          git checkout develop
-          git checkout -b "${BRANCH}"
-
-          # Update ghost.bu with new version and hash
-          GHOST_BU="opentofu/modules/vultr/instance/userdata/ghost.bu"
-
-          # Get current version for the sed pattern
-          CURRENT_VERSION=$(grep -oP 'alloy-\K[0-9]+\.[0-9]+\.[0-9]+(?=-amd64\.raw)' "${GHOST_BU}" | head -1)
+          # Extract current version
+          CURRENT_VERSION=$(echo "$CURRENT_CONTENT" | grep -oP 'alloy-\K[0-9]+\.[0-9]+\.[0-9]+(?=-amd64\.raw)' | head -1)
 
           if [ -z "${CURRENT_VERSION}" ]; then
             echo "ERROR: Could not determine current Alloy version in ghost.bu"
@@ -238,33 +239,41 @@ jobs:
 
           echo "Updating from ${CURRENT_VERSION} to ${VERSION}"
 
-          # Update version in path and source URL (3 occurrences: file path, source URL, symlink)
-          sed -i "s/alloy-${CURRENT_VERSION}-amd64\.raw/alloy-${VERSION}-amd64.raw/g" "${GHOST_BU}"
-
-          # Update SHA256 hash
-          sed -i "s/sha256-[a-f0-9]\{64\}/sha256-${HASH}/g" "${GHOST_BU}"
+          # Update the content
+          NEW_CONTENT=$(echo "$CURRENT_CONTENT" | sed "s/alloy-${CURRENT_VERSION}-amd64\.raw/alloy-${VERSION}-amd64.raw/g")
+          NEW_CONTENT=$(echo "$NEW_CONTENT" | sed "s/sha256-[a-f0-9]\{64\}/sha256-${HASH}/g")
 
           # Verify changes were made
-          if ! grep -q "alloy-${VERSION}-amd64.raw" "${GHOST_BU}"; then
+          if ! echo "$NEW_CONTENT" | grep -q "alloy-${VERSION}-amd64.raw"; then
             echo "ERROR: Version update failed"
             exit 1
           fi
 
-          if ! grep -q "sha256-${HASH}" "${GHOST_BU}"; then
+          if ! echo "$NEW_CONTENT" | grep -q "sha256-${HASH}"; then
             echo "ERROR: Hash update failed"
             exit 1
           fi
 
-          echo "✓ ghost.bu updated successfully"
+          echo "✓ ghost.bu content updated successfully"
 
-          # Commit and push
-          git add "${GHOST_BU}"
-          git commit -m "chore: update Grafana Alloy sysext to ${VERSION}"
-          git push -u origin "${BRANCH}"
+          # Base64 encode the new content
+          NEW_CONTENT_B64=$(echo "$NEW_CONTENT" | base64 -w 0)
+
+          # Update file via API (creates a verified commit signed by GitHub)
+          echo "Committing changes via GitHub API..."
+          gh api repos/${REPO}/contents/${FILE_PATH} \
+            --method PUT \
+            --field message="chore: update Grafana Alloy sysext to ${VERSION}" \
+            --field content="${NEW_CONTENT_B64}" \
+            --field sha="${FILE_SHA}" \
+            --field branch="${BRANCH}"
+
+          echo "✓ Commit created (verified by GitHub)"
 
           # Create PR
-          gh pr create \
-            --repo noahwhite/ghost-stack \
+          echo "Creating pull request..."
+          PR_URL=$(gh pr create \
+            --repo ${REPO} \
             --base develop \
             --head "${BRANCH}" \
             --title "Update Grafana Alloy sysext to ${VERSION}" \
@@ -290,11 +299,13 @@ jobs:
           - Sysext image: https://ghost-sysext-images.separationofconcerns.dev/alloy-${VERSION}-amd64.raw
           - Alloy release: https://github.com/grafana/alloy/releases/tag/v${VERSION}
           EOF
-          )"
+          )")
+
+          echo "PR created: ${PR_URL}"
 
           # Assign PR to Noah White
-          PR_NUMBER=$(gh pr view --repo noahwhite/ghost-stack --json number -q '.number')
-          gh api repos/noahwhite/ghost-stack/issues/${PR_NUMBER} \
+          PR_NUMBER=$(gh pr view --repo ${REPO} --json number -q '.number')
+          gh api repos/${REPO}/issues/${PR_NUMBER} \
             --method PATCH \
             --field assignees[]="noahwhite"
 
