@@ -43,7 +43,6 @@ scripts/
   fetch-secrets.sh          # Retrieves R2 credentials from Bitwarden
 Dockerfile                  # Build container image
 build-alloy-sysext.sh       # Main build script
-version.txt                 # Tracks last built Alloy version
 ```
 
 ## CI/CD Workflows
@@ -68,11 +67,11 @@ Triggered by:
 
 Automated version detection that runs daily:
 
-1. Reads current built version from `version.txt`
+1. Gets current built version from latest release tag in this repo
 2. Checks latest stable Alloy release from GitHub API
 3. Compares versions to detect updates
-4. Triggers `build-and-publish.yml` if new version found
-5. Updates `version.txt` and creates a tracking issue
+4. Creates a new release (which triggers build-and-publish.yml)
+5. Creates a tracking issue
 
 Triggered by:
 - Daily cron schedule (midnight UTC)

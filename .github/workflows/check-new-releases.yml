@@ -25,12 +25,17 @@ jobs:
 
       - name: Get current built version
         id: current
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          if [ -f version.txt ]; then
-            CURRENT_VERSION=$(cat version.txt | tr -d '[:space:]')
-          else
+          # Get latest release tag from this repo (tracks last built version)
+          CURRENT_VERSION=$(gh api repos/${{ github.repository }}/releases/latest \
+            --jq '.tag_name' 2>/dev/null | sed 's/^v//' || echo "0.0.0")
+
+          if [ -z "$CURRENT_VERSION" ] || [ "$CURRENT_VERSION" = "null" ]; then
             CURRENT_VERSION="0.0.0"
           fi
+
           echo "version=${CURRENT_VERSION}" >> $GITHUB_OUTPUT
           echo "Current built version: ${CURRENT_VERSION}"
 
@@ -43,12 +48,12 @@ jobs:
           LATEST=$(gh api repos/grafana/alloy/releases \
             --jq '[.[] | select(.prerelease == false)] | .[0].tag_name' \
             | sed 's/^v//')
-          
+
           if [ -z "$LATEST" ]; then
             echo "ERROR: Could not determine latest Alloy version"
             exit 1
           fi
-          
+
           echo "version=${LATEST}" >> $GITHUB_OUTPUT
           echo "Latest Alloy version: ${LATEST}"
 
@@ -57,12 +62,12 @@ jobs:
         run: |
           CURRENT="${{ steps.current.outputs.version }}"
           LATEST="${{ steps.latest.outputs.version }}"
-          
+
           echo "Comparing: current=${CURRENT} vs latest=${LATEST}"
-          
+
           # Use sort -V for version comparison
           HIGHER=$(echo -e "${CURRENT}\n${LATEST}" | sort -V | tail -1)
-          
+
           if [ "$HIGHER" = "$LATEST" ] && [ "$CURRENT" != "$LATEST" ]; then
             echo "New version available: ${LATEST}"
             echo "update_available=true" >> $GITHUB_OUTPUT
@@ -71,30 +76,35 @@ jobs:
             echo "update_available=false" >> $GITHUB_OUTPUT
           fi
 
-      - name: Trigger build workflow
+      - name: Get Alloy release notes
+        if: steps.compare.outputs.update_available == 'true'
+        id: release_notes
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION="${{ steps.latest.outputs.version }}"
+
+          # Get release notes (truncated for the release body)
+          NOTES=$(gh api repos/grafana/alloy/releases/tags/v${VERSION} \
+            --jq '.body' | head -100)
+
+          # Save to file to avoid shell escaping issues
+          echo "$NOTES" > /tmp/release_notes.txt
+
+      - name: Create release to trigger build
         if: steps.compare.outputs.update_available == 'true' && inputs.dry_run != true
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           VERSION="${{ steps.latest.outputs.version }}"
-          echo "Triggering build for version ${VERSION}"
-          
-          gh workflow run build-and-publish.yml \
-            --field version="${VERSION}"
-          
-          echo "Build workflow triggered for version ${VERSION}"
 
-      - name: Update version.txt
-        if: steps.compare.outputs.update_available == 'true' && inputs.dry_run != true
-        run: |
-          VERSION="${{ steps.latest.outputs.version }}"
-          echo "${VERSION}" > version.txt
-          
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add version.txt
-          git commit -m "chore: update version.txt to ${VERSION}"
-          git push
+          echo "Creating release v${VERSION} to trigger build workflow"
+
+          gh release create "v${VERSION}" \
+            --title "Alloy Sysext ${VERSION}" \
+            --notes-file /tmp/release_notes.txt
+
+          echo "Release created - build workflow will be triggered automatically"
 
       - name: Create tracking issue
         if: steps.compare.outputs.update_available == 'true' && inputs.dry_run != true
@@ -102,11 +112,8 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           VERSION="${{ steps.latest.outputs.version }}"
-          
-          # Get release notes
-          RELEASE_NOTES=$(gh api repos/grafana/alloy/releases/tags/v${VERSION} \
-            --jq '.body' | head -50)
-          
+          RELEASE_NOTES=$(cat /tmp/release_notes.txt | head -50)
+
           gh issue create \
             --title "Alloy ${VERSION} sysext build triggered" \
             --body "$(cat <<EOF
