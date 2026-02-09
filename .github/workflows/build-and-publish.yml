@@ -225,6 +225,13 @@ jobs:
           DEVELOP_SHA=$(gh api repos/${REPO}/git/ref/heads/develop --jq '.object.sha')
           echo "Develop branch SHA: ${DEVELOP_SHA}"
 
+          # Delete branch if it already exists (from previous failed attempt)
+          echo "Checking if branch ${BRANCH} already exists..."
+          if gh api repos/${REPO}/git/refs/heads/${BRANCH} --silent 2>/dev/null; then
+            echo "Branch exists, deleting it..."
+            gh api repos/${REPO}/git/refs/heads/${BRANCH} --method DELETE
+          fi
+
           # Create feature branch from develop using the API
           echo "Creating branch ${BRANCH}..."
           gh api repos/${REPO}/git/refs \
