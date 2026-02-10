@@ -58,6 +58,7 @@ jobs:
           fi
 
           # For workflow_dispatch, check if release already exists
+          # If release exists, the artifacts were already built and uploaded
           if gh release view "v${VERSION}" &>/dev/null; then
             echo "✓ Release v${VERSION} already exists, skipping build"
             echo "skip=true" >> $GITHUB_OUTPUT
@@ -205,6 +206,8 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     if: (github.event_name == 'release' || github.event_name == 'workflow_dispatch') && needs.build.outputs.skip != 'true'
+    permissions:
+      contents: write
 
     steps:
       - name: Checkout repository
@@ -259,6 +262,36 @@ jobs:
 
           echo "=== Upload complete ==="
           echo "Files available at: https://ghost-sysext-images.separationofconcerns.dev/"
+
+      - name: Get Alloy release notes
+        id: release_notes
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION="${{ needs.build.outputs.version }}"
+
+          # Get release notes from upstream Alloy release
+          NOTES=$(gh api repos/grafana/alloy/releases/tags/v${VERSION} \
+            --jq '.body' 2>/dev/null | head -100 || echo "Alloy ${VERSION} sysext image")
+
+          # Save to file to avoid shell escaping issues
+          echo "$NOTES" > /tmp/release_notes.txt
+
+      - name: Create release
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION="${{ needs.build.outputs.version }}"
+
+          echo "=== Creating release v${VERSION} ==="
+
+          gh release create "v${VERSION}" \
+            --title "Alloy Sysext ${VERSION}" \
+            --notes-file /tmp/release_notes.txt
+
+          echo "✓ Release v${VERSION} created"
 
       - name: Extract SHA256 hash
         id: hash
