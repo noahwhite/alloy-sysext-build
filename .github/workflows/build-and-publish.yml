@@ -23,6 +23,7 @@ jobs:
 
     outputs:
       version: ${{ steps.version.outputs.version }}
+      skip: ${{ steps.check-release.outputs.skip }}
 
     steps:
       - name: Checkout repository
@@ -42,10 +43,35 @@ jobs:
           echo "version=${VERSION}" >> $GITHUB_OUTPUT
           echo "Building Alloy sysext for version: ${VERSION}"
 
+      - name: Check if version already released
+        id: check-release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+
+          # Skip this check if triggered by a release event (the release is what we're building)
+          if [ "${{ github.event_name }}" = "release" ]; then
+            echo "Triggered by release event, proceeding with build"
+            echo "skip=false" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          # For workflow_dispatch, check if release already exists
+          if gh release view "v${VERSION}" &>/dev/null; then
+            echo "✓ Release v${VERSION} already exists, skipping build"
+            echo "skip=true" >> $GITHUB_OUTPUT
+          else
+            echo "Release v${VERSION} does not exist, proceeding with build"
+            echo "skip=false" >> $GITHUB_OUTPUT
+          fi
+
       - name: Set up Docker Buildx
+        if: steps.check-release.outputs.skip != 'true'
         uses: docker/setup-buildx-action@v3
 
       - name: Build Docker image
+        if: steps.check-release.outputs.skip != 'true'
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -55,9 +81,11 @@ jobs:
           cache-to: type=gha,mode=max
 
       - name: Create output directory
+        if: steps.check-release.outputs.skip != 'true'
         run: mkdir -p output
 
       - name: Build sysext image
+        if: steps.check-release.outputs.skip != 'true'
         run: |
           docker run --rm \
             -v "${PWD}/output:/output" \
@@ -67,9 +95,11 @@ jobs:
             /build/build-alloy-sysext.sh
 
       - name: List output files
+        if: steps.check-release.outputs.skip != 'true'
         run: ls -la output/
 
       - name: Validate sysext structure
+        if: steps.check-release.outputs.skip != 'true'
         run: |
           VERSION="${{ steps.version.outputs.version }}"
           SYSEXT_FILE="output/alloy-${VERSION}-amd64.raw"
@@ -116,6 +146,7 @@ jobs:
           echo "=== Validation passed ==="
 
       - name: Verify checksums
+        if: steps.check-release.outputs.skip != 'true'
         run: |
           cd output
           echo "=== Verifying checksums ==="
@@ -124,6 +155,7 @@ jobs:
           echo "=== Checksums verified ==="
 
       - name: Upload artifacts
+        if: steps.check-release.outputs.skip != 'true'
         uses: actions/upload-artifact@v4
         with:
           name: alloy-sysext-${{ steps.version.outputs.version }}
@@ -135,7 +167,7 @@ jobs:
   publish:
     needs: build
     runs-on: ubuntu-latest
-    if: github.event_name == 'release' || github.event_name == 'workflow_dispatch'
+    if: (github.event_name == 'release' || github.event_name == 'workflow_dispatch') && needs.build.outputs.skip != 'true'
 
     steps:
       - name: Checkout repository
@@ -251,6 +283,12 @@ jobs:
           if [ -z "${CURRENT_VERSION}" ]; then
             echo "ERROR: Could not determine current Alloy version in ghost.bu"
             exit 1
+          fi
+
+          # Check if version is already current - skip PR creation
+          if [ "${CURRENT_VERSION}" = "${VERSION}" ]; then
+            echo "✓ Version ${VERSION} is already in ghost.bu, skipping PR creation"
+            exit 0
           fi
 
           echo "Updating from ${CURRENT_VERSION} to ${VERSION}"
