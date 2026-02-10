@@ -43,7 +43,7 @@ jobs:
           echo "version=${VERSION}" >> $GITHUB_OUTPUT
           echo "Building Alloy sysext for version: ${VERSION}"
 
-      - name: Check if version already released
+      - name: Check if artifacts already exist in R2
         id: check-release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -57,12 +57,17 @@ jobs:
             exit 0
           fi
 
-          # For workflow_dispatch, check if release already exists
-          if gh release view "v${VERSION}" &>/dev/null; then
-            echo "✓ Release v${VERSION} already exists, skipping build"
+          # For workflow_dispatch, check if artifacts already exist in R2
+          # Note: We check R2, not the release tag, because check-new-releases.yml
+          # creates the release before triggering the build via workflow_dispatch
+          ARTIFACT_URL="https://ghost-sysext-images.separationofconcerns.dev/alloy-${VERSION}-amd64.raw"
+          HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" "$ARTIFACT_URL")
+
+          if [ "$HTTP_STATUS" = "200" ]; then
+            echo "✓ Artifacts for v${VERSION} already exist in R2, skipping build"
             echo "skip=true" >> $GITHUB_OUTPUT
           else
-            echo "Release v${VERSION} does not exist, proceeding with build"
+            echo "Artifacts for v${VERSION} not found in R2 (HTTP ${HTTP_STATUS}), proceeding with build"
             echo "skip=false" >> $GITHUB_OUTPUT
           fi
 
