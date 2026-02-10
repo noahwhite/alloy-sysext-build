@@ -84,8 +84,74 @@ Triggered by:
 | `BWS_ACCESS_TOKEN` | Bitwarden Secrets Manager access |
 | `APP_ID` | GitHub App ID for alloy-sysext-automation |
 | `APP_PRIVATE_KEY` | GitHub App private key (PEM format) |
+| `GPG_PRIVATE_KEY` | Base64-encoded GPG private key for signing sysext images |
 
 R2 credentials are retrieved at runtime from Bitwarden (not stored in GitHub).
+
+### GPG Signing Key
+
+Sysext images are signed with GPG to enable verification by systemd-sysupdate on the target systems. The signature files (`.asc`) are uploaded to R2 alongside the images.
+
+**Key Details:**
+- **Algorithm:** RSA 4096-bit (no expiration)
+- **Purpose:** Sign Alloy sysext images for verification
+- **Public Key Location:** Deployed to `/etc/sysupdate.alloy.d/alloy.gpg` on ghost-stack instances
+
+### Generating the GPG Key
+
+```bash
+# Generate a new GPG key (non-interactive)
+gpg --batch --gen-key <<EOF
+Key-Type: RSA
+Key-Length: 4096
+Name-Real: Alloy Sysext Signing Key
+Name-Email: alloy-sysext@separationofconcerns.dev
+Expire-Date: 0
+%no-protection
+EOF
+
+# List the key to get the key ID
+gpg --list-secret-keys --keyid-format LONG
+
+# Export the private key (base64-encoded for GitHub secret)
+gpg --armor --export-secret-keys alloy-sysext@separationofconcerns.dev | base64 -w 0 > gpg-private-key.b64
+
+# Export the public key (for deployment to ghost-stack)
+gpg --armor --export alloy-sysext@separationofconcerns.dev > alloy-sysext-signing.pub
+```
+
+### Adding the GPG Secret
+
+```bash
+# Add to GitHub secrets (reads from the base64 file)
+gh secret set GPG_PRIVATE_KEY --repo noahwhite/alloy-sysext-build < gpg-private-key.b64
+```
+
+### Deploying the Public Key
+
+The public key must be deployed to ghost-stack instances for systemd-sysupdate to verify signatures:
+
+1. Base64-encode the public key:
+   ```bash
+   base64 -w 0 alloy-sysext-signing.pub
+   ```
+
+2. Add to ghost.bu in ghost-stack (see ghost-stack CLAUDE.md for details)
+
+### Key Rotation
+
+**Rotation Procedure:**
+
+1. **Generate new key pair** (follow steps above)
+2. **Update GitHub secret:**
+   ```bash
+   gh secret set GPG_PRIVATE_KEY --repo noahwhite/alloy-sysext-build < new-gpg-private-key.b64
+   ```
+3. **Update ghost-stack** with the new public key
+4. **Deploy ghost-stack** to push new public key to instances
+5. **Re-sign existing images** (optional) or wait for next build
+
+**Note:** During rotation, old images will fail verification until the new public key is deployed.
 
 ### GitHub App: alloy-sysext-automation
 
@@ -215,8 +281,10 @@ docker run --rm \
 output/
   alloy-{VERSION}-amd64.raw          # Sysext image
   alloy-{VERSION}-amd64.raw.sha256   # Checksum
+  alloy-{VERSION}-amd64.raw.asc      # GPG signature
   alloy-{VERSION}.raw                # Compatibility symlink
   alloy-{VERSION}.raw.sha256         # Checksum
+  alloy-{VERSION}.raw.asc            # GPG signature
 ```
 
 ## Related Repository

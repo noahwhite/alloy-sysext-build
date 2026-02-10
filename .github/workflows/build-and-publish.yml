@@ -154,6 +154,42 @@ jobs:
           sha256sum -c alloy-${{ steps.version.outputs.version }}.raw.sha256
           echo "=== Checksums verified ==="
 
+      - name: Import GPG signing key
+        if: steps.check-release.outputs.skip != 'true'
+        env:
+          GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
+        run: |
+          echo "=== Importing GPG signing key ==="
+          echo "${GPG_PRIVATE_KEY}" | base64 -d | gpg --batch --import
+
+          # Get the key ID for signing
+          KEY_ID=$(gpg --list-secret-keys --keyid-format LONG | grep sec | head -1 | awk '{print $2}' | cut -d'/' -f2)
+          echo "GPG Key ID: ${KEY_ID}"
+          echo "gpg_key_id=${KEY_ID}" >> $GITHUB_ENV
+
+      - name: Sign sysext images
+        if: steps.check-release.outputs.skip != 'true'
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+
+          echo "=== Signing sysext images ==="
+
+          # Sign the versioned amd64 image
+          gpg --batch --yes --armor --detach-sign \
+            --local-user "${gpg_key_id}" \
+            "output/alloy-${VERSION}-amd64.raw"
+          echo "✓ Signed alloy-${VERSION}-amd64.raw"
+
+          # Sign the compatibility symlink target (same file, different name)
+          gpg --batch --yes --armor --detach-sign \
+            --local-user "${gpg_key_id}" \
+            "output/alloy-${VERSION}.raw"
+          echo "✓ Signed alloy-${VERSION}.raw"
+
+          # List all output files including signatures
+          echo "=== Output files ==="
+          ls -la output/
+
       - name: Upload artifacts
         if: steps.check-release.outputs.skip != 'true'
         uses: actions/upload-artifact@v4
@@ -162,6 +198,7 @@ jobs:
           path: |
             output/*.raw
             output/*.sha256
+            output/*.asc
           retention-days: 30
 
   publish:
@@ -212,8 +249,8 @@ jobs:
 
           echo "=== Uploading to R2 bucket ==="
 
-          # Upload files to R2
-          for file in output/*.raw output/*.sha256; do
+          # Upload files to R2 (including .asc signature files)
+          for file in output/*.raw output/*.sha256 output/*.asc; do
             filename=$(basename "$file")
             echo "Uploading ${filename}..."
             aws s3 cp "$file" "s3://${R2_BUCKET}/${filename}" \
