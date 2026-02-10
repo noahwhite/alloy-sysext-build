@@ -95,21 +95,6 @@ jobs:
           # Save to file to avoid shell escaping issues
           echo "$NOTES" > /tmp/release_notes.txt
 
-      - name: Create release
-        if: steps.compare.outputs.update_available == 'true' && inputs.dry_run != true
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          VERSION="${{ steps.latest.outputs.version }}"
-
-          echo "Creating release v${VERSION}"
-
-          gh release create "v${VERSION}" \
-            --title "Alloy Sysext ${VERSION}" \
-            --notes-file /tmp/release_notes.txt
-
-          echo "Release created"
-
       - name: Trigger build workflow
         if: steps.compare.outputs.update_available == 'true' && inputs.dry_run != true
         env:
@@ -121,6 +106,7 @@ jobs:
 
           # Trigger via workflow_dispatch since releases created by GITHUB_TOKEN
           # don't trigger other workflows (GitHub security feature)
+          # Note: The build workflow will create the release after successful upload
           gh workflow run build-and-publish.yml \
             --field version="${VERSION}"
 
@@ -155,7 +141,8 @@ jobs:
           The build workflow will:
           1. Build the sysext image
           2. Upload to R2
-          3. **Create a PR in ghost-stack** to update ghost.bu
+          3. Create a release tag in this repo
+          4. **Create a PR in ghost-stack** to update ghost.bu
 
           ### Next Steps
 
