@@ -355,14 +355,6 @@ jobs:
             exit 1
           fi
 
-          # Check if version is already current - skip PR creation
-          if [ "${CURRENT_VERSION}" = "${VERSION}" ]; then
-            echo "✓ Version ${VERSION} is already in ghost.bu, skipping PR creation"
-            exit 0
-          fi
-
-          echo "Updating from ${CURRENT_VERSION} to ${VERSION}"
-
           # Extract the current Alloy hash (appears after the alloy source URL)
           CURRENT_HASH=$(echo "$CURRENT_CONTENT" | grep -A3 "ghost-sysext-images.separationofconcerns.dev/alloy-" | grep -oP 'sha256-\K[a-f0-9]{64}' | head -1)
 
@@ -371,8 +363,22 @@ jobs:
             exit 1
           fi
 
-          echo "Current Alloy hash: ${CURRENT_HASH}"
-          echo "New Alloy hash: ${HASH}"
+          echo "Current version: ${CURRENT_VERSION}, hash: ${CURRENT_HASH}"
+          echo "New version: ${VERSION}, hash: ${HASH}"
+
+          # Check if version AND hash are already current - skip PR creation
+          # This allows rebuilds of the same version (e.g., after enabling GPG signing)
+          # to still create PRs when the hash changes
+          if [ "${CURRENT_VERSION}" = "${VERSION}" ] && [ "${CURRENT_HASH}" = "${HASH}" ]; then
+            echo "✓ Version ${VERSION} with same hash is already in ghost.bu, skipping PR creation"
+            exit 0
+          fi
+
+          if [ "${CURRENT_VERSION}" = "${VERSION}" ]; then
+            echo "Same version but different hash - creating PR to update hash"
+          else
+            echo "Updating from ${CURRENT_VERSION} to ${VERSION}"
+          fi
 
           # Update the content - only replace the specific Alloy hash, not all hashes
           NEW_CONTENT=$(echo "$CURRENT_CONTENT" | sed "s/alloy-${CURRENT_VERSION}-amd64\.raw/alloy-${VERSION}-amd64.raw/g")
