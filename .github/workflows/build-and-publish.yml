@@ -253,6 +253,12 @@ jobs:
             exit 1
           fi
 
+          # Check if version is already current - skip PR creation
+          if [ "${CURRENT_VERSION}" = "${VERSION}" ]; then
+            echo "✓ Version ${VERSION} is already in ghost.bu, skipping PR creation"
+            exit 0
+          fi
+
           echo "Updating from ${CURRENT_VERSION} to ${VERSION}"
 
           # Extract the current Alloy hash (appears after the alloy source URL)
