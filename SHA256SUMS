@@ -1,0 +1,3 @@
+# SHA256SUMS manifest for systemd-sysupdate
+# Format: <sha256-hash>  <filename>
+# Auto-updated by build-and-publish.yml workflow
