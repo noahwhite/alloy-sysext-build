@@ -239,6 +239,15 @@ jobs:
           echo "sha256=${HASH}" >> $GITHUB_OUTPUT
           echo "SHA256 hash: ${HASH}"
 
+      - name: Generate GitHub App token
+        id: app-token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ secrets.APP_ID }}
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+          owner: noahwhite
+          repositories: alloy-sysext-build,ghost-stack
+
       - name: Update SHA256SUMS manifest
         env:
           GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
@@ -285,19 +294,63 @@ jobs:
           echo "=== Manifest signed ==="
 
       - name: Commit SHA256SUMS to repo
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
+          VERSION="${{ needs.build.outputs.version }}"
+          REPO="noahwhite/alloy-sysext-build"
 
-          git add SHA256SUMS SHA256SUMS.gpg
+          echo "=== Committing SHA256SUMS via GitHub API ==="
 
-          if git diff --staged --quiet; then
-            echo "No changes to commit"
+          # Get current SHA256SUMS file SHA (if it exists)
+          SUMS_SHA=$(gh api repos/${REPO}/contents/SHA256SUMS --jq '.sha' 2>/dev/null || echo "")
+
+          # Base64 encode the new content
+          SUMS_CONTENT=$(base64 -w 0 SHA256SUMS)
+
+          # Commit SHA256SUMS
+          if [ -n "$SUMS_SHA" ]; then
+            echo "Updating existing SHA256SUMS..."
+            gh api repos/${REPO}/contents/SHA256SUMS \
+              --method PUT \
+              --field message="chore: update SHA256SUMS for alloy ${VERSION}" \
+              --field content="${SUMS_CONTENT}" \
+              --field sha="${SUMS_SHA}" \
+              --field branch="main"
           else
-            git commit -m "chore: update SHA256SUMS for alloy ${{ needs.build.outputs.version }}"
-            git push
-            echo "=== Manifest committed to repo ==="
+            echo "Creating new SHA256SUMS..."
+            gh api repos/${REPO}/contents/SHA256SUMS \
+              --method PUT \
+              --field message="chore: update SHA256SUMS for alloy ${VERSION}" \
+              --field content="${SUMS_CONTENT}" \
+              --field branch="main"
           fi
+
+          # Get current SHA256SUMS.gpg file SHA (if it exists)
+          GPG_SHA=$(gh api repos/${REPO}/contents/SHA256SUMS.gpg --jq '.sha' 2>/dev/null || echo "")
+
+          # Base64 encode the signature
+          GPG_CONTENT=$(base64 -w 0 SHA256SUMS.gpg)
+
+          # Commit SHA256SUMS.gpg
+          if [ -n "$GPG_SHA" ]; then
+            echo "Updating existing SHA256SUMS.gpg..."
+            gh api repos/${REPO}/contents/SHA256SUMS.gpg \
+              --method PUT \
+              --field message="chore: update SHA256SUMS.gpg for alloy ${VERSION}" \
+              --field content="${GPG_CONTENT}" \
+              --field sha="${GPG_SHA}" \
+              --field branch="main"
+          else
+            echo "Creating new SHA256SUMS.gpg..."
+            gh api repos/${REPO}/contents/SHA256SUMS.gpg \
+              --method PUT \
+              --field message="chore: update SHA256SUMS.gpg for alloy ${VERSION}" \
+              --field content="${GPG_CONTENT}" \
+              --field branch="main"
+          fi
+
+          echo "=== Manifest committed to repo (verified by GitHub App) ==="
 
       - name: Install Bitwarden Secrets Manager CLI (bws)
         run: |
@@ -376,15 +429,6 @@ jobs:
             --notes-file /tmp/release_notes.txt
 
           echo "✓ Release v${VERSION} created"
-
-      - name: Generate GitHub App token
-        id: app-token
-        uses: actions/create-github-app-token@v1
-        with:
-          app-id: ${{ secrets.APP_ID }}
-          private-key: ${{ secrets.APP_PRIVATE_KEY }}
-          owner: noahwhite
-          repositories: ghost-stack
 
       - name: Create ghost-stack PR
         env:
