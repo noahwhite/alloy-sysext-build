@@ -94,16 +94,21 @@ Builds, validates, signs, and publishes sysext images:
 5. Imports GPG private key from `GPG_PRIVATE_KEY` secret
 6. Creates detached signatures (`.asc` files) for all `.raw` images
 
+**Manifest Phase:**
+7. Updates `SHA256SUMS` manifest in this repo (add/update entry for current version)
+8. Signs manifest with GPG to create `SHA256SUMS.gpg`
+9. Commits both files to main branch via GitHub Contents API (verified commits)
+
 **Publish Phase:**
-7. Retrieves R2 credentials from Bitwarden via `fetch-secrets.sh`
-8. Uploads images, checksums, and signatures to Cloudflare R2 bucket
-9. Creates release tag in this repo (for workflow_dispatch triggers only)
+10. Retrieves R2 credentials from Bitwarden via `fetch-secrets.sh`
+11. Uploads images, checksums, signatures, and manifest files to Cloudflare R2 bucket
+12. Creates release tag in this repo (for workflow_dispatch triggers only)
 
 **Ghost-Stack Integration:**
-10. Generates GitHub App token for ghost-stack access
-11. Creates feature branch `feature/update-alloy-sysext-to-{VERSION}`
-12. Updates ghost.bu with new version and hash
-13. Creates PR and assigns to Noah White
+13. Generates GitHub App token for ghost-stack access
+14. Creates feature branch `feature/update-alloy-sysext-to-{VERSION}`
+15. Updates ghost.bu with new version and hash
+16. Creates PR and assigns to Noah White
 
 **Skip Logic:**
 - For `workflow_dispatch`: Skips if release tag already exists AND hash matches
@@ -184,12 +189,14 @@ Sysext images are signed with GPG to enable cryptographic verification by system
 │  (CI Pipeline)      │     │    (Storage)        │     │   (Instance)        │
 ├─────────────────────┤     ├─────────────────────┤     ├─────────────────────┤
 │ GPG Private Key     │────▶│ alloy-X.raw         │────▶│ GPG Public Key      │
-│ (GitHub Secret)     │     │ alloy-X.raw.asc     │     │ (/etc/sysupdate.    │
-│                     │     │ alloy-X.raw.sha256  │     │  alloy.d/alloy.gpg) │
+│ (GitHub Secret)     │     │ alloy-X.raw.asc     │     │ (merged into        │
+│                     │     │ alloy-X.raw.sha256  │     │  import-pubring.gpg)│
+│                     │     │ SHA256SUMS          │     │                     │
+│                     │     │ SHA256SUMS.gpg      │     │                     │
 └─────────────────────┘     └─────────────────────┘     └─────────────────────┘
         │                           │                           │
         │ Signs images              │ Stores signed             │ Verifies
-        │ during build              │ artifacts                 │ signatures
+        │ + manifest                │ artifacts                 │ signatures
         └───────────────────────────┴───────────────────────────┘
 ```
 
@@ -250,9 +257,14 @@ gh secret list --repo noahwhite/alloy-sysext-build
 
 ### Deploying the Public Key to ghost-stack
 
-The public key is deployed via Ignition to `/etc/sysupdate.alloy.d/alloy.gpg` on ghost-stack instances.
+The public key is deployed via Ignition to `/etc/systemd/alloy-sysext.gpg.pub` on ghost-stack instances. At boot, a service merges this with system vendor keys into the global keyring at `/etc/systemd/import-pubring.gpg`.
 
 **Location in ghost-stack:** `opentofu/modules/vultr/instance/userdata/ghost.bu`
+
+**Key files on instance:**
+- `/etc/systemd/alloy-sysext.gpg.pub` - Alloy signing public key (deployed via Ignition)
+- `/usr/lib/systemd/import-pubring.gpg` - System vendor keys (read-only, from OS)
+- `/etc/systemd/import-pubring.gpg` - Merged keyring (generated at boot)
 
 The public key is embedded inline in the Butane file. To update:
 
@@ -261,7 +273,7 @@ The public key is embedded inline in the Butane file. To update:
    gpg --armor --export alloy-sysext@separationofconcerns.dev
    ```
 
-2. Replace the key content in ghost.bu under the `alloy.gpg` file entry
+2. Replace the key content in ghost.bu under the `alloy-sysext.gpg.pub` file entry
 
 3. Create a PR and deploy
 
@@ -310,6 +322,93 @@ The public key is embedded inline in the Butane file. To update:
    ```
 
 **Note:** During rotation, there's a brief window where the instance has the old public key but R2 has newly signed images. The next `tofu apply` resolves this.
+
+## SHA256SUMS Manifest
+
+### Overview
+
+systemd-sysupdate with `Verify=true` requires a `SHA256SUMS` manifest to discover available versions and verify downloads. The manifest is stored in this repository and uploaded to R2 alongside the sysext images.
+
+**Files:**
+- `SHA256SUMS` - Standard sha256sum format listing all available versions
+- `SHA256SUMS.gpg` - Detached GPG signature for manifest verification
+
+**Format:**
+```
+<64-char-sha256-hash>  <filename>
+```
+
+**Example:**
+```
+abc123...def  alloy-1.14.0-amd64.raw
+789xyz...456  alloy-1.14.1-amd64.raw
+```
+
+### How systemd-sysupdate Uses the Manifest
+
+1. Fetches `<Path>/SHA256SUMS` from the configured URL
+2. Verifies signature against `<Path>/SHA256SUMS.gpg` using system keyring
+3. Parses filenames with `MatchPattern` to extract available versions
+4. Downloads matching files and verifies against listed hashes
+
+### Build Pipeline Integration
+
+The manifest is updated automatically during each build:
+
+1. **Update Entry**: Existing entry for the version is replaced (handles rebuilds)
+2. **Sort Versions**: Entries sorted by version number for readability
+3. **Sign Manifest**: GPG signs the manifest to create `SHA256SUMS.gpg`
+4. **Commit to Repo**: Uses GitHub Contents API for verified commits
+5. **Upload to R2**: Both files uploaded alongside the sysext image
+
+**Note:** The workflow uses `concurrency: alloy-sysext-build` to serialize builds and prevent race conditions when updating the manifest.
+
+### Verified Commits
+
+The SHA256SUMS commit uses the GitHub App token with the Contents API, which creates commits that are automatically verified by GitHub. This is necessary because:
+- Branch protection requires signed commits
+- Branch protection requires changes via PR (Contents API bypasses this for app commits)
+- Commits appear with the "Verified" badge in GitHub
+
+### GPG Keyring on Ghost Instances
+
+systemd-sysupdate uses a global keyring at `/etc/systemd/import-pubring.gpg`. The ghost-stack configures a merge service that:
+
+1. Copies system vendor keys from `/usr/lib/systemd/import-pubring.gpg` (if present)
+2. Appends the Alloy signing public key
+3. Writes merged keyring to `/etc/systemd/import-pubring.gpg`
+
+This preserves vendor keys (Flatcar, Ubuntu, etc.) while adding the Alloy key for signature verification.
+
+**Service:** `sysupdate-import-pubring.service` runs before any systemd-sysupdate service.
+
+### Manual Manifest Operations
+
+**View current manifest:**
+```bash
+curl -s https://ghost-sysext-images.separationofconcerns.dev/SHA256SUMS
+```
+
+**Verify manifest signature:**
+```bash
+curl -sO https://ghost-sysext-images.separationofconcerns.dev/SHA256SUMS
+curl -sO https://ghost-sysext-images.separationofconcerns.dev/SHA256SUMS.gpg
+gpg --verify SHA256SUMS.gpg SHA256SUMS
+```
+
+**Add entry manually (if needed):**
+```bash
+# Get hash
+HASH=$(curl -s https://ghost-sysext-images.separationofconcerns.dev/alloy-X.Y.Z-amd64.raw.sha256 | awk '{print $1}')
+
+# Add to manifest
+echo "${HASH}  alloy-X.Y.Z-amd64.raw" >> SHA256SUMS
+sort -t'-' -k2 -V SHA256SUMS -o SHA256SUMS
+
+# Re-sign
+gpg --armor --detach-sign SHA256SUMS
+mv SHA256SUMS.asc SHA256SUMS.gpg
+```
 
 ### GitHub App: alloy-sysext-automation
 
@@ -556,6 +655,8 @@ aws s3 ls s3://<bucket>/ --endpoint-url https://<account>.r2.cloudflarestorage.c
 ## Related Repository
 
 - **ghost-stack**: Consumes the sysext images in Flatcar Butane configuration
-  - Public key deployed to `/etc/sysupdate.alloy.d/alloy.gpg`
-  - Sysupdate config at `/etc/sysupdate.alloy.d/alloy.conf`
+  - Public key deployed to `/etc/systemd/alloy-sysext.gpg.pub`
+  - Merged keyring at `/etc/systemd/import-pubring.gpg` (includes vendor keys)
+  - Sysupdate config at `/etc/sysupdate.alloy.d/alloy.conf` with `Verify=true`
   - Initial version pinned in `ghost.bu`
+  - Auto-updates via systemd-sysupdate using SHA256SUMS manifest
