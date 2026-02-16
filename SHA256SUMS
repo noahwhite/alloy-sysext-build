@@ -1,3 +1,1 @@
-# SHA256SUMS manifest for systemd-sysupdate
-# Format: <sha256-hash>  <filename>
-# Auto-updated by build-and-publish.yml workflow
+ffdc107b18618da6c17ef6ff8b1d14dcf50a402418f358e0d3215ad1da891518  alloy-1.13.1-amd64.raw
