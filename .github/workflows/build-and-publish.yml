@@ -10,6 +10,11 @@ on:
         required: true
         type: string
 
+# Serialize workflow runs to prevent race conditions when updating SHA256SUMS
+concurrency:
+  group: alloy-sysext-build
+  cancel-in-progress: false
+
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}-builder
@@ -212,6 +217,9 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          # Fetch full history for committing back to repo
+          fetch-depth: 0
 
       - name: Download artifacts
         uses: actions/download-artifact@v4
@@ -221,6 +229,75 @@ jobs:
 
       - name: List artifacts
         run: ls -la output/
+
+      - name: Extract SHA256 hash
+        id: hash
+        run: |
+          VERSION="${{ needs.build.outputs.version }}"
+          # Read hash from checksum file (format: "hash  filename")
+          HASH=$(cut -d' ' -f1 output/alloy-${VERSION}-amd64.raw.sha256)
+          echo "sha256=${HASH}" >> $GITHUB_OUTPUT
+          echo "SHA256 hash: ${HASH}"
+
+      - name: Update SHA256SUMS manifest
+        env:
+          GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
+        run: |
+          VERSION="${{ needs.build.outputs.version }}"
+          HASH="${{ steps.hash.outputs.sha256 }}"
+          FILENAME="alloy-${VERSION}-amd64.raw"
+
+          echo "=== Updating SHA256SUMS manifest ==="
+
+          # Remove any existing entry for this version (in case of rebuild)
+          if [ -f SHA256SUMS ]; then
+            grep -v "${FILENAME}$" SHA256SUMS > SHA256SUMS.tmp || true
+            mv SHA256SUMS.tmp SHA256SUMS
+          else
+            touch SHA256SUMS
+          fi
+
+          # Remove comment lines for clean manifest
+          grep -v "^#" SHA256SUMS > SHA256SUMS.tmp || true
+          mv SHA256SUMS.tmp SHA256SUMS
+
+          # Add new entry (sha256sum format: <hash>  <filename>)
+          echo "${HASH}  ${FILENAME}" >> SHA256SUMS
+
+          # Sort by version for readability (oldest first, newest last)
+          sort -t'-' -k2 -V SHA256SUMS -o SHA256SUMS
+
+          echo "=== SHA256SUMS contents ==="
+          cat SHA256SUMS
+
+          # Import GPG key
+          echo "${GPG_PRIVATE_KEY}" | base64 -d | gpg --batch --import
+          KEY_ID=$(gpg --list-secret-keys --keyid-format LONG | grep sec | head -1 | awk '{print $2}' | cut -d'/' -f2)
+
+          # Create detached signature
+          gpg --batch --yes --armor --detach-sign \
+            --local-user "${KEY_ID}" \
+            SHA256SUMS
+
+          # Rename to .gpg (systemd-sysupdate convention)
+          mv SHA256SUMS.asc SHA256SUMS.gpg
+
+          echo "=== Manifest signed ==="
+
+      - name: Commit SHA256SUMS to repo
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          git add SHA256SUMS SHA256SUMS.gpg
+
+          if git diff --staged --quiet; then
+            echo "No changes to commit"
+          else
+            git commit -m "chore: update SHA256SUMS for alloy ${{ needs.build.outputs.version }}"
+            git push
+            echo "=== Manifest committed to repo ==="
+          fi
 
       - name: Install Bitwarden Secrets Manager CLI (bws)
         run: |
@@ -252,13 +329,20 @@ jobs:
 
           echo "=== Uploading to R2 bucket ==="
 
-          # Upload files to R2 (including .asc signature files)
+          # Upload artifact files
           for file in output/*.raw output/*.sha256 output/*.asc; do
             filename=$(basename "$file")
             echo "Uploading ${filename}..."
             aws s3 cp "$file" "s3://${R2_BUCKET}/${filename}" \
               --endpoint-url "${R2_ENDPOINT}"
           done
+
+          # Upload manifest and signature
+          echo "Uploading SHA256SUMS..."
+          aws s3 cp SHA256SUMS "s3://${R2_BUCKET}/SHA256SUMS" \
+            --endpoint-url "${R2_ENDPOINT}"
+          aws s3 cp SHA256SUMS.gpg "s3://${R2_BUCKET}/SHA256SUMS.gpg" \
+            --endpoint-url "${R2_ENDPOINT}"
 
           echo "=== Upload complete ==="
           echo "Files available at: https://ghost-sysext-images.separationofconcerns.dev/"
@@ -292,15 +376,6 @@ jobs:
             --notes-file /tmp/release_notes.txt
 
           echo "✓ Release v${VERSION} created"
-
-      - name: Extract SHA256 hash
-        id: hash
-        run: |
-          VERSION="${{ needs.build.outputs.version }}"
-          # Read hash from checksum file (format: "hash  filename")
-          HASH=$(cut -d' ' -f1 output/alloy-${VERSION}-amd64.raw.sha256)
-          echo "sha256=${HASH}" >> $GITHUB_OUTPUT
-          echo "SHA256 hash: ${HASH}"
 
       - name: Generate GitHub App token
         id: app-token
