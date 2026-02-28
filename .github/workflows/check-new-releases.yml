@@ -120,6 +120,18 @@ jobs:
           VERSION="${{ steps.latest.outputs.version }}"
           RELEASE_NOTES=$(cat /tmp/release_notes.txt | head -50)
 
+          # Skip if an open issue already exists for this version
+          EXISTING=$(gh issue list \
+            --search "\"Alloy ${VERSION} sysext build triggered\" in:title" \
+            --state open \
+            --json number \
+            --jq 'length')
+
+          if [ "$EXISTING" -gt 0 ]; then
+            echo "Issue already exists for Alloy ${VERSION}, skipping creation"
+            exit 0
+          fi
+
           gh issue create \
             --title "Alloy ${VERSION} sysext build triggered" \
             --body "$(cat <<EOF
