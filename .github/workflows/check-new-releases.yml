@@ -134,6 +134,7 @@ jobs:
 
           gh issue create \
             --title "Alloy ${VERSION} sysext build triggered" \
+            --label "RTB" \
             --body "$(cat <<EOF
           ## Automated Build Triggered
 
