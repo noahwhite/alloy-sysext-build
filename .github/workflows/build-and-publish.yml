@@ -576,8 +576,8 @@ jobs:
         id: app-token-officina
         uses: actions/create-github-app-token@v3
         with:
-          app-id: ${{ secrets.APP_ID }}
-          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+          app-id: ${{ secrets.OFFICINA_APP_ID }}
+          private-key: ${{ secrets.OFFICINA_APP_PRIVATE_KEY }}
           owner: officina-pub
           repositories: infisical-stack
 
