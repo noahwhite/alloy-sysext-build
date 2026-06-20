@@ -131,10 +131,10 @@ echo "Retrieving R2 credentials from Bitwarden Secrets Manager..."
 # ============================================================================
 
 # Retrieve into local variables (do not echo values)
-R2_ACCESS_KEY_ID="$(get_bws_secret "9dfdf110-5a84-48c3-ad7e-b39b002afd6b")"
+R2_ACCESS_KEY_ID="$(get_bws_secret "c4b665ad-6760-4879-a4a5-b46f002ca071")"
 mask_value "$R2_ACCESS_KEY_ID"
 
-R2_SECRET_ACCESS_KEY="$(get_bws_secret "f5d9794d-fd45-4dcb-9994-b39b002b5056")"
+R2_SECRET_ACCESS_KEY="$(get_bws_secret "05ca7d67-1edc-4765-8623-b46f002d3b52")"
 mask_value "$R2_SECRET_ACCESS_KEY"
 
 CLOUDFLARE_ACCOUNT_ID="$(get_bws_secret "2fea4609-0d6b-4d8d-b9b5-b39b002de85b")"
